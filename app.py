@@ -247,6 +247,10 @@ def index():
         session['pontos'] = {'1': 0, '2': 0}
         session['jogador_atual'] = 1
         session['dados_girados'] = []
+    
+    # Garantir que todas as chaves existam na sessão
+    if 'dados_girados' not in session:
+        session['dados_girados'] = []
         
     # Mostrar regras do jogo
     regras = {
@@ -265,12 +269,24 @@ def index():
                          pontos=session['pontos'],
                          jogador_atual=session['jogador_atual'],
                          regras=regras,
-                         dados_girados=session.get('dados_girados', []))
+                         dados_girados=session['dados_girados'])
 
 @app.route('/jogar_dado')
 def jogar_dado():
+    if 'dados_girados' not in session:
+        session['dados_girados'] = []
+        
+    if len(session['dados_girados']) >= 2:
+        session['dados_girados'] = []
+        
     valor = random.randint(1, 6)
-    return jsonify({'valor': valor})
+    session['dados_girados'].append(valor)
+    session.modified = True
+    
+    return jsonify({
+        'valor': valor,
+        'dados_girados': session['dados_girados']
+    })
 
 @app.route('/get_pergunta', methods=['POST'])
 def get_pergunta():
@@ -284,40 +300,66 @@ def get_pergunta():
 @app.route('/proximo_jogador')
 def proximo_jogador():
     session['jogador_atual'] = 2 if session['jogador_atual'] == 1 else 1
+    session['dados_girados'] = []
     session.modified = True
     return jsonify({
-        'jogador_atual': session['jogador_atual']
+        'jogador_atual': session['jogador_atual'],
+        'pontos': session['pontos']
     })
 
 @app.route('/verificar_resposta', methods=['POST'])
 def verificar_resposta():
     dados = request.get_json()
-    resposta_usuario = dados['resposta']
+    resposta_usuario = dados.get('resposta')
     coordenada = dados['coordenada']
     cor = dados['cor']
     
     coord_key = f"{coordenada['x']},{coordenada['y']}"
+    
+    # Caso especial: Casa Premiada
+    if coord_key == '5,5':
+        jogador_vencedor = session['jogador_atual']
+        return jsonify({
+            'vitoria_imediata': True,
+            'vencedor': jogador_vencedor
+        })
+
     pontos_ganhos = 0
+    correto = False
     
     if coord_key in PERGUNTAS:
         pergunta = PERGUNTAS[coord_key]
-        correto = resposta_usuario == pergunta['resposta']
+        correto = (resposta_usuario == pergunta['resposta'])
         
         if correto and cor in PONTOS_COR:
             pontos_ganhos = PONTOS_COR[cor]
-            jogador_atual = str(session['jogador_atual'])
-            session['pontos'][jogador_atual] = int(session['pontos'][jogador_atual]) + pontos_ganhos
-            session.modified = True
+            jogador_atual_key = str(session['jogador_atual'])
+            session['pontos'][jogador_atual_key] = int(session['pontos'][jogador_atual_key]) + pontos_ganhos
             
-        # Só muda o jogador depois de atualizar os pontos
-        proximo_jogador = 2 if session['jogador_atual'] == 1 else 1
-        session['jogador_atual'] = proximo_jogador
+        # Sempre reseta os dados após uma resposta (certa ou errada)
+        session['dados_girados'] = []
+        
+        # Só muda o jogador se errou ou se o jogo continua
+        # Mas as regras dizem "Caso o tempo acabe ou a resposta esteja incorreta, passa a vez"
+        # Isso implica que se ACERTAR, pode jogar de novo? 
+        # Geralmente em jogos de tabuleiro, você joga, responde e passa a vez.
+        # Vamos seguir a regra: errou -> passa a vez. Acertou -> ganha pontos e passa a vez? 
+        # Vou manter a troca de jogador para manter o fluxo dinâmico, mas com feedback claro.
+        
+        proximo = 2 if session['jogador_atual'] == 1 else 1
+        vencedor = None
+        if session['pontos'][str(session['jogador_atual'])] >= 10:
+            vencedor = session['jogador_atual']
+        
+        session['jogador_atual'] = proximo
+        session.modified = True
         
         return jsonify({
             'correto': correto,
             'pontos': session['pontos'],
-            'jogador_atual': proximo_jogador,
-            'pontos_ganhos': pontos_ganhos
+            'jogador_atual': proximo,
+            'pontos_ganhos': pontos_ganhos,
+            'vencedor': vencedor
         })
     
     return jsonify({'erro': 'Coordenada inválida'})

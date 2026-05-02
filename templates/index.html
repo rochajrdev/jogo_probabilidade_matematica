@@ -173,9 +173,11 @@
                 <div class="game-board">
                     <div class="tabuleiro animate__animated animate__zoomIn">
                         {% for linha in tabuleiro %}
-                        <div class="linha">
+                        {% set x = loop.index %}
+                        <div class="linha" data-linha="{{ x }}">
                             {% for cor in linha %}
-                            <div class="casa {{ cor }}" data-cor="{{ cor }}"></div>
+                            {% set y = loop.index %}
+                            <div class="casa {{ cor }}" data-cor="{{ cor }}" data-x="{{ x }}" data-y="{{ y }}"></div>
                             {% endfor %}
                         </div>
                         {% endfor %}
@@ -199,159 +201,157 @@
         </div>
     </div>
 
+    <!-- Modais Customizados -->
+    <div id="modal-vitoria" class="modal-overlay" style="display: none;">
+        <div class="modal-content animate__animated animate__zoomIn">
+            <div class="vitoria-emoji">🏆</div>
+            <h2 id="vitoria-titulo">Parabéns!</h2>
+            <p id="vitoria-texto"></p>
+            <div class="vitoria-pontos">
+                <span id="vitoria-pontos-valor"></span> pontos
+            </div>
+            <button id="btn-recomecar" class="btn-principal">Jogar Novamente 🎮</button>
+        </div>
+    </div>
+
+    <div id="modal-feedback" class="modal-overlay" style="display: none;">
+        <div class="modal-content animate__animated animate__fadeInUp">
+            <div id="feedback-icon" class="feedback-icon"></div>
+            <h2 id="feedback-titulo"></h2>
+            <p id="feedback-texto"></p>
+            <button id="btn-fechar-feedback" class="btn-opcao">Continuar</button>
+        </div>
+    </div>
+
     <script>
         // Variáveis globais
-        let dadosJogados = [];
+        let dadosJogados = {{ dados_girados|tojson }};
         let timer;
         const casaPremiada = '5,5';
         
         // Cores e pontuações
         const PONTOS_COR = {
-            'red': 3,    // Vermelho🟥
-            'blue': 5,   // Azul🟦
-            'green': 2   // Verde🟩
+            'red': 3,
+            'blue': 5,
+            'green': 2
         };
 
-        // Função de início do jogo
+        // Inicialização
+        window.addEventListener('load', () => {
+            if (dadosJogados.length > 0) {
+                document.getElementById('valor-dados').textContent = dadosJogados.join(', ');
+                if (dadosJogados.length === 2) {
+                    const coordenada = { x: dadosJogados[0], y: dadosJogados[1] };
+                    marcarCasaTabuleiro(coordenada);
+                    mostrarPergunta(coordenada);
+                }
+            }
+        });
+
+        // Início do jogo
         document.getElementById('comecar-jogo').addEventListener('click', () => {
             document.getElementById('regras').style.display = 'none';
             document.getElementById('jogo').style.display = 'block';
         });
 
-        // Função para esperar
         function sleep(ms) {
             return new Promise(resolve => setTimeout(resolve, ms));
         }
 
-        // Animação do dado
         async function animarDado() {
             const animacaoDiv = document.getElementById('animacao-dado');
             const valorAtual = document.getElementById('valor-dado-atual');
             
             animacaoDiv.style.display = 'block';
-            valorAtual.textContent = "Girando o dado...";
             
-            for (let i = 0; i < 10; i++) {
+            for (let i = 0; i < 8; i++) {
                 const valor = Math.floor(Math.random() * 6) + 1;
                 valorAtual.textContent = `🎲 ${valor}`;
-                await sleep(100);
+                await sleep(80);
             }
             
             const response = await fetch('/jogar_dado');
             const data = await response.json();
             valorAtual.textContent = `🎲 ${data.valor}`;
-            await sleep(500);
+            await sleep(400);
             
             animacaoDiv.style.display = 'none';
-            return data.valor;
+            return { valor: data.valor, todos: data.dados_girados };
         }
 
-        // Girar o dado
         document.getElementById('jogar-dado').addEventListener('click', async () => {
-            if (dadosJogados.length >= 2) {
-                mostrarMensagem('Aguarde a próxima rodada!');
-                return;
-            }
+            if (dadosJogados.length >= 2) return;
 
-            const valor = await animarDado();
-            dadosJogados.push(valor);
+            const resultado = await animarDado();
+            dadosJogados = resultado.todos;
             
             document.getElementById('valor-dados').textContent = dadosJogados.join(', ');
 
-            if (dadosJogados.length < 2) {
-                mostrarMensagem(`Primeiro dado: ${valor}. Gire novamente.`);
-            } else {
-                const coordenada = {
-                    x: dadosJogados[0],
-                    y: dadosJogados[1]
-                };
-                
-                if (`${coordenada.x},${coordenada.y}` === casaPremiada) {
-                    mostrarMensagem('🎉 Você tirou a casa premiada! Vitória automática!');
-                    await sleep(2000);
-                    await fetch('/reiniciar_jogo');
-                    location.reload();
-                    return;
-                }
-                
-                mostrarPergunta(coordenada);
+            if (dadosJogados.length === 1) {
+                mostrarMensagem(`Primeiro dado: ${dadosJogados[0]}. Gire novamente.`);
+            } else if (dadosJogados.length === 2) {
+                const coordenada = { x: dadosJogados[0], y: dadosJogados[1] };
                 marcarCasaTabuleiro(coordenada);
+                mostrarPergunta(coordenada);
             }
         });
 
-        // Marcar casa no tabuleiro
         function marcarCasaTabuleiro(coordenada) {
-            document.querySelectorAll('.casa').forEach(casa => {
-                casa.classList.remove('selecionada');
-            });
-
-            const linha = coordenada.x - 1;
-            const coluna = coordenada.y - 1;
-
-            const linhas = document.querySelectorAll('.linha');
-            if (linhas[linha]) {
-                const casas = linhas[linha].querySelectorAll('.casa');
-                if (casas[coluna]) {
-                    casas[coluna].classList.add('selecionada');
-                }
-            }
+            document.querySelectorAll('.casa').forEach(casa => casa.classList.remove('selecionada'));
+            const casa = document.querySelector(`.casa[data-x="${coordenada.x}"][data-y="${coordenada.y}"]`);
+            if (casa) casa.classList.add('selecionada');
         }
 
-        // Mostrar pergunta
         async function mostrarPergunta(coordenada) {
             const response = await fetch('/get_pergunta', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(coordenada)
             });
 
             const data = await response.json();
             if (data.erro) {
                 mostrarMensagem(data.erro);
-                dadosJogados = [];
-                document.getElementById('valor-dados').textContent = '';
+                resetTurnoLocal();
+                return;
+            }
+
+            // Verificar se é casa premiada via backend (opcional, já tratado no JS mas melhor no backend)
+            if (coordenada.x == 5 && coordenada.y == 5) {
+                verificarResposta(null, coordenada); // Ativa a lógica de casa premiada
                 return;
             }
 
             const container = document.getElementById('pergunta-container');
-            const casaSelecionada = document.querySelector('.casa.selecionada');
-            const cor = casaSelecionada ? casaSelecionada.dataset.cor : '';
+            const casa = document.querySelector(`.casa[data-x="${coordenada.x}"][data-y="${coordenada.y}"]`);
+            const cor = casa ? casa.dataset.cor : '';
             
             container.style.display = 'block';
-            // Remove todas as classes de cor antigas
             container.classList.remove('red', 'blue', 'green');
-            // Adiciona a classe da cor atual
-            if (cor) {
-                container.classList.add(cor);
-            }
+            if (cor) container.classList.add(cor);
             
             document.getElementById('pergunta-texto').textContent = data.questao;
-
             const opcoesContainer = document.getElementById('opcoes-container');
             opcoesContainer.innerHTML = '';
+            
             data.opcoes.forEach(opcao => {
                 const button = document.createElement('button');
                 button.textContent = opcao;
                 button.classList.add('btn-opcao');
-                button.addEventListener('click', () => verificarResposta(opcao, coordenada));
+                button.onclick = () => verificarResposta(opcao, coordenada);
                 opcoesContainer.appendChild(button);
             });
 
             iniciarTimer();
         }
 
-        // Timer
         function iniciarTimer() {
             let tempo = 40;
             document.getElementById('tempo').textContent = tempo;
-            
             clearInterval(timer);
             timer = setInterval(() => {
                 tempo--;
                 document.getElementById('tempo').textContent = tempo;
-                
                 if (tempo <= 0) {
                     clearInterval(timer);
                     tempoEsgotado();
@@ -359,104 +359,116 @@
             }, 1000);
         }
 
-        // Verificar resposta
         async function verificarResposta(resposta, coordenada) {
             clearInterval(timer);
+            const casa = document.querySelector(`.casa[data-x="${coordenada.x}"][data-y="${coordenada.y}"]`);
+            const cor = casa ? casa.dataset.cor : '';
             
             try {
-                const casaSelecionada = document.querySelector('.casa.selecionada');
-                const cor = casaSelecionada ? casaSelecionada.dataset.cor : '';
-                
                 const response = await fetch('/verificar_resposta', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        resposta: resposta,
-                        coordenada: coordenada,
-                        cor: cor // Enviando a cor para o backend
-                    })
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ resposta, coordenada, cor })
                 });
 
                 const data = await response.json();
-                
                 document.getElementById('pergunta-container').style.display = 'none';
                 
+                if (data.vitoria_imediata) {
+                    showVictoryModal(data.vencedor, "Você caiu na Casa Premiada!");
+                    return;
+                }
+
                 if (data.correto) {
-                    mostrarMensagem(`✅ Resposta correta! Jogador ganha ${data.pontos_ganhos} pontos.`);
+                    showFeedback(true, `✅ Correto! +${data.pontos_ganhos} pontos`);
                 } else {
-                    mostrarMensagem('❌ Resposta errada! Você perdeu a vez.');
+                    showFeedback(false, `❌ Errado! Passando a vez...`);
                 }
 
                 atualizarPlacar(data.pontos);
                 atualizarJogadorAtual(data.jogador_atual);
                 
-                if (data.pontos['1'] >= 10 || data.pontos['2'] >= 10) {
-                    const vencedor = data.pontos['1'] >= 10 ? 1 : 2;
-                    await sleep(1000);
-                    mostrarMensagem(`🎉 Jogador ${vencedor} venceu!`);
-                    await sleep(2000);
-                    location.reload();
+                if (data.vencedor) {
+                    await sleep(1500);
+                    showVictoryModal(data.vencedor, "Alcançou 10 pontos primeiro!");
                     return;
                 }
 
-                await sleep(1500);
-                dadosJogados = [];
-                document.getElementById('valor-dados').textContent = '';
-                document.querySelectorAll('.casa').forEach(casa => casa.classList.remove('selecionada'));
-                
+                resetTurnoLocal();
             } catch (error) {
-                console.error('Erro ao verificar resposta:', error);
-                mostrarMensagem('❌ Erro ao verificar resposta. Tente novamente.');
+                mostrarMensagem('❌ Erro de conexão.');
             }
         }
 
-        // Tempo esgotado
-        function tempoEsgotado() {
-            mostrarMensagem('⏳ Tempo esgotado! Passando a vez...');
-            document.getElementById('pergunta-container').style.display = 'none';
+        function resetTurnoLocal() {
             dadosJogados = [];
             document.getElementById('valor-dados').textContent = '';
-            document.querySelectorAll('.casa').forEach(casa => casa.classList.remove('selecionada'));
-            fetch('/proximo_jogador');
+            document.querySelectorAll('.casa').forEach(c => c.classList.remove('selecionada'));
         }
 
-        // Mostrar mensagem
+        async function tempoEsgotado() {
+            document.getElementById('pergunta-container').style.display = 'none';
+            showFeedback(false, "⏳ Tempo esgotado!");
+            const response = await fetch('/proximo_jogador');
+            const data = await response.json();
+            atualizarPlacar(data.pontos);
+            atualizarJogadorAtual(data.jogador_atual);
+            resetTurnoLocal();
+        }
+
+        function showFeedback(sucesso, texto) {
+            const modal = document.getElementById('modal-feedback');
+            const titulo = document.getElementById('feedback-titulo');
+            const desc = document.getElementById('feedback-texto');
+            const icon = document.getElementById('feedback-icon');
+            
+            titulo.textContent = sucesso ? "Muito bem!" : "Que pena!";
+            desc.textContent = texto;
+            icon.innerHTML = sucesso ? "✨" : "💨";
+            modal.style.display = 'flex';
+            
+            document.getElementById('btn-fechar-feedback').onclick = () => {
+                modal.style.display = 'none';
+            };
+        }
+
+        function showVictoryModal(jogador, motivo) {
+            const modal = document.getElementById('modal-vitoria');
+            document.getElementById('vitoria-titulo').textContent = `Jogador ${jogador} Venceu!`;
+            document.getElementById('vitoria-texto').textContent = motivo;
+            document.getElementById('vitoria-pontos-valor').textContent = document.getElementById(`pontos-${jogador}`).textContent;
+            modal.style.display = 'flex';
+            
+            document.getElementById('btn-recomecar').onclick = async () => {
+                await fetch('/reiniciar_jogo');
+                location.reload();
+            };
+        }
+
         function mostrarMensagem(texto) {
-            const mensagem = document.getElementById('mensagem');
-            if (mensagem) {
-                mensagem.textContent = texto;
-                mensagem.style.display = 'block';
-                setTimeout(() => {
-                    if (mensagem.style.display !== 'none') {
-                        mensagem.style.display = 'none';
-                    }
-                }, 3000);
-            }
+            const msg = document.getElementById('mensagem');
+            msg.textContent = texto;
+            msg.style.display = 'block';
+            setTimeout(() => msg.style.display = 'none', 3000);
         }
 
-        // Atualizar placar
         function atualizarPlacar(pontos) {
             document.getElementById('pontos-1').textContent = pontos['1'];
             document.getElementById('pontos-2').textContent = pontos['2'];
         }
 
-        // Atualizar jogador atual
         function atualizarJogadorAtual(jogador) {
             document.getElementById('jogador-atual').textContent = jogador;
+            document.getElementById('status-1').className = `jogador-status ${jogador == 1 ? 'ativo' : ''}`;
+            document.getElementById('status-2').className = `jogador-status ${jogador == 2 ? 'ativo' : ''}`;
         }
 
-        // Reiniciar jogo
-        document.getElementById('reiniciar').addEventListener('click', async () => {
-            if (confirm('Tem certeza que deseja reiniciar o jogo?')) {
-                const response = await fetch('/reiniciar_jogo');
-                const data = await response.json();
-                if (data.success) {
-                    location.reload();
-                }
+        document.getElementById('reiniciar').onclick = async () => {
+            if (confirm('Deseja reiniciar?')) {
+                await fetch('/reiniciar_jogo');
+                location.reload();
             }
-        });
+        };
     </script>
 </body>
 </html>
